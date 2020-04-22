@@ -451,8 +451,6 @@ int main(int argc, char* argv[]) {
     // close file
     inFile.close();
 
-    // ----- *-_-* ----- @_@ ----- ^3^ ----- *_* ----- >3< ----- +_+ ----- //
-
     // open two files for 2nd read & write
 
     ifstream inFile2(filename);
