@@ -1,367 +1,519 @@
-#include <bitset>
-#include <cstring>
-#include <fstream>
+
 #include <iostream>
-#include <sstream>
+#include <fstream>
 #include <string>
-#include <unordered_map>
+#include <sstream>
+#include <map>
 
-#define MAX_SIZE 10000
-#define TEXT_START 0x400000
-#define DATA_START 0x10000000
+using std::string;
+using std::ifstream;
+using std::ofstream;
+using std::istringstream;
+using std::cin;
+using std::cout;
 
-// namespace declare
-using namespace std;
+// R-type
+#define add 0x20
+#define addu 0x21
+#define And 0x24
+#define div 0x1a	// rd = 0
+#define divu 0x1b	// rd = 0
+#define mult 0x18	// rd = 0
+#define multu 0x19	// rd = 0
+#define nor 0x27
+#define Or 0x25
+#define sll 0		// shamt
+#define sllv 4
+#define sra 3		// shamt
+#define srav 7
+#define srl 2		// shamt
+#define srlv 6
+#define sub 0x22
+#define subu 0x23
+#define Xor 0x26
+#define slt 0x2a
+#define sltu 0x2b
+#define jalr 9		// rt = 0
+#define jr	8	    // rd = rt = 0
+#define teq 0x34	// rd = 0
+#define tne 0x36	// rd = 0
+#define tge 0x30	// rd = 0
+#define tgeu 0x31	// rd = 0
+#define tlt 0x32	// rd = 0
+#define tltu 0x33	// rd = 0
 
-// opcode map
-unordered_map<string, int> opmap = {
-    {"addu", 0},  {"and", 0},  {"nor", 0},  {"or", 0},     {"sltu", 0},
-    {"sll", 0},   {"srl", 0},  {"subu", 0}, {"jr", 0},     {"addiu", 9},
-    {"andi", 12}, {"lui", 15}, {"ori", 13}, {"sltiu", 11}, {"beq", 4},
-    {"bne", 5},   {"lw", 35},  {"sw", 43},  {"j", 2},      {"jal", 3},
-    {"la", 99}};
+#define mfhi 0x10	// rd
+#define mflo 0x12	// rd
 
-// fn map
-unordered_map<string, int> fnmap = {{"addu", 0x21},
-                                    {"and", 0x24},
-                                    {"nor", 0x27},
-                                    {"or", 0x25},
-                                    {"sltu", 0x2b},
-                                    {"sll", 0},
-                                    {"srl", 2},
-                                    {"subu", 0x23},
-                                    {"jr", 8}};
+#define mthi 0x11	// rs
+#define mtlo 0x13	// rs
 
-// data value, data address map, label map
-unordered_map<string, int> v_map;
-unordered_map<string, int> a_map;
-unordered_map<string, int> labelmap;
+// I-type
+#define addi 8
+#define addiu 9
+#define andi 0xc
+#define ori 0xd
+#define xori 0xe
+#define lui 0xf		// rs=0
+#define slti 0xa
+#define sltiu 0xb
+#define bclf 0x11	// rs=cc	rt=0
+#define bclt 0x11	// rs=cc	rt=1
+#define beq 4
+#define bgez 1		// rt=1
+#define bgezal 1		// rt=0x11
+#define bgtz 7		//rt= 0
+#define blez 6		//rt= 0
+#define bltzal 1		//rt= 0x10
+#define bltz 1		// rt=0
+#define bne 5
+#define teqi 1	    // rt = 0xc
+#define tnei 1	    // rt = 0xe
+#define tgei 1	    // rt = 8
+#define tgeiu 1	    // rt = 9
+#define tlti 1	    // rt = 0xa
+#define tltiu 1	    // rt = 0xb
 
-char delim[] = " ,$\t";  // possible separators
-char delim2[] = " \t";   // possible separators
+#define lb 0x20
+#define lbu 0x24
+#define lh 0x21
+#define lhu 0x25
+#define lw 0x23
+#define lwl 0x22
+#define lwr 0x26
+#define ll 0x30
+#define sb 0x28
+#define sh 0x29
+#define sw 0x2b
+#define swl 0x2a
+#define swr 0x2e
+#define sc 0x38
 
-int pc = DATA_START;
+// J-type
+#define J	2
+#define jal 3
 
-// class definition
-/**
- * @brief
- * This class simulate the R-type instruction with 6 register identification
- * code.
- */
-class Rtype {
-  private:
-    bitset<6> opcode;  // operation code
-    bitset<5> rs;      // first source operand register
-    bitset<5> rt;      // second source operand register
-    bitset<5> rd;      // result register
-    bitset<5> sft;     // the displacement of the displacement instruction
-    bitset<6> fn;      // R-type instruction's specific operation
-  public:
-    /**
-     * @brief
-     * SetInfo receive the input instructions to each R-type instruction
-     * variable
-     * @param _opcode, recieve operation code
-     * @param _rs, recieve instruction of first source operand register
-     * @param _rt, recieve instruction of second source operand register
-     * @param _rd, recieve instruction of result register
-     * @param _sft, recieve the displacement of the displacement instruction
-     * @param _fn, recieve R-type instruction's specific operation
-     * @return void
-     */
-    void SetInfo(int _opcode, int _rs, int _rt, int _rd, int _sft, int _fn) {
-        opcode = bitset<6>(_opcode);
-        rs = bitset<5>(_rs);
-        rt = bitset<5>(_rt);
-        rd = bitset<5>(_rd);
-        sft = bitset<5>(_sft);
-        fn = bitset<6>(_fn);
+namespace assembler {
+    std::map<string, int> labels;
+    std::map<string, int> RTypes;
+    std::map<string, int> ITypes;
+    std::map<string, int> JTypes;
+    std::map<string, int> rts;
+    std::map<string, int> Regs;
+    void init() {
+	    RTypes["add"] = add;
+	    RTypes["addu"] = addu;
+	    RTypes["and"] = And;
+	    RTypes["div"] = div;
+	    RTypes["divu"] = divu;
+	    RTypes["mult"] = mult;
+	    RTypes["multu"] = multu;
+	    RTypes["nor"] = nor;
+	    RTypes["or"] = Or;
+	    RTypes["sll"] = sll;
+	    RTypes["sllv"] = sllv;
+	    RTypes["sra"] = sra;
+	    RTypes["srav"] = srav;
+	    RTypes["srl"] = srl;
+	    RTypes["srlv"] = srlv;
+	    RTypes["sub"] = sub;
+	    RTypes["subu"] = subu;
+	    RTypes["xor"] = Xor;
+	    RTypes["slt"] = slt;
+	    RTypes["sltu"] = sltu;
+	    RTypes["jalr"] = jalr;
+	    RTypes["jr"] = jr;
+	    RTypes["teq"] = teq;
+	    RTypes["tne"] = tne;
+	    RTypes["tge"] = tge;
+	    RTypes["tgeu"] = tgeu;
+	    RTypes["tlt"] = tlt;
+	    RTypes["tltu"] = tltu;
+	    RTypes["mfhi"] = mfhi;
+	    RTypes["mflo"] = mflo;
+	    RTypes["mthi"] = mthi;
+	    RTypes["mtlo"] = mtlo;
+
+	    ITypes["addi"] = addi;
+	    ITypes["addiu"] = addiu;
+	    ITypes["andi"] = andi;
+	    ITypes["ori"] = ori;
+	    ITypes["xori"] = xori;
+	    ITypes["lui"] = lui;
+	    ITypes["slti"] = slti;
+	    ITypes["sltiu"] = sltiu;
+	    ITypes["bclf"] = bclf;
+	    ITypes["bclt"] = bclt;
+	    ITypes["beq"] = beq;
+	    ITypes["bgez"] = bgez;
+	    ITypes["bgezal"] = bgezal;
+	    ITypes["bgtz"] = bgtz;
+	    ITypes["blez"] = blez;
+	    ITypes["bltzal"] = bltzal;
+	    ITypes["bltz"] = bltz;
+	    ITypes["bne"] = bne;
+	    ITypes["teqi"] = teqi;
+	    ITypes["tnei"] = tnei;
+	    ITypes["tgei"] = tgei;
+	    ITypes["tgeiu"] = tgeiu;
+	    ITypes["tlti"] = tlti;
+	    ITypes["tltiu"] = tltiu;
+	    ITypes["lb"] = lb;
+	    ITypes["lbu"] = lbu;
+	    ITypes["lh"] = lh;
+	    ITypes["lhu"] = lhu;
+	    ITypes["lw"] = lw;
+	    ITypes["lwl"] = lwl;
+	    ITypes["lwr"] = lwr;
+	    ITypes["ll"] = ll;
+	    ITypes["sb"] = sb;
+	    ITypes["sh"] = sh;
+	    ITypes["sw"] = sw;
+	    ITypes["swl"] = swl;
+	    ITypes["swr"] = swr;
+	    ITypes["sc"] = sc;
+
+	    JTypes["j"] = J;
+	    JTypes["jal"] = jal;
+
+	    rts["bclf"] = 0;
+	    rts["bclt"] = 1;
+	    rts["bgez"] = 1;
+	    rts["bgezal"] = 0x11;
+	    rts["bltzal"] = 0x10;
+	    rts["bltz"] = 0;
+	    rts["teqi"] = 0xc;
+	    rts["tnei"] = 0xe;
+	    rts["tgei"] = 8;
+	    rts["tgeiu"] = 9;
+	    rts["tlti"] = 0xa;
+	    rts["tltiu"] = 0xb;
+
+	    Regs["$ze"] = 0;
+	    Regs["$at"] = 1;
+	    Regs["$v0"] = 2;
+	    Regs["$v1"] = 3;
+	    Regs["$a0"] = 4;
+	    Regs["$a1"] = 5;
+	    Regs["$a2"] = 6;
+	    Regs["$a3"] = 7;
+	    Regs["$t0"] = 8;
+	    Regs["$t1"] = 9;
+	    Regs["$t2"] = 10;
+	    Regs["$t3"] = 11;
+	    Regs["$t4"] = 12;
+	    Regs["$t5"] = 13;
+	    Regs["$t6"] = 14;
+	    Regs["$t7"] = 15;
+	    Regs["$s0"] = 16;
+	    Regs["$s1"] = 17;
+	    Regs["$s2"] = 18;
+	    Regs["$s3"] = 19;
+	    Regs["$s4"] = 20;
+	    Regs["$s5"] = 21;
+	    Regs["$s6"] = 22;
+	    Regs["$s7"] = 23;
+	    Regs["$t8"] = 24;
+	    Regs["$t9"] = 25;
+	    Regs["$k0"] = 26;
+	    Regs["$k1"] = 27;
+	    Regs["$gp"] = 28;
+	    Regs["$sp"] = 29;
+	    Regs["$fp"] = 30;
+	    Regs["$ra"] = 31;
     }
-    /**
-     * @brief
-     * Use format() function to return the generated machine instruction in
-     * string.
-     * @return string
-     */
-    string format() {
-        return opcode.to_string() + rs.to_string() + rt.to_string() +
-               rd.to_string() + sft.to_string() + fn.to_string();
-    }
-};
 
-/**
- * @brief
- * This class simulate the I-type instruction with 4 register identification
- * code.
- */
-class Itype {
-  private:
-    bitset<6> opcode;  // operation code
-    bitset<5> rs;      // first source operand register
-    bitset<5> rt;      // second source operand register
-    bitset<16> imm;    // immediate number or load/store instruction and branch
-                       // instruction's offset address
-  public:
-    /**
-     * @brief
-     * SetInfo receive the input instructions to each I-type instruction
-     * variable
-     * @param _opcode, recieve operation code
-     * @param _rs, recieve instruction of first source operand register
-     * @param _rt, recieve instruction of second source operand register
-     * @param _imm, recieve immediate number or load/store instruction and
-     * branch instruction's offset address
-     * @return void
-     */
-    void SetInfo(int _opcode, int _rs, int _rt, int _imm) {
-        opcode = bitset<6>(_opcode);
-        rs = bitset<5>(_rs);
-        rt = bitset<5>(_rt);
-        imm = bitset<16>(_imm);
-    }
-    /**
-     * @brief
-     * Use format() function to return the generated machine instruction in
-     * string.
-     * @return string
-     */
-    string format() {
-        return opcode.to_string() + rs.to_string() + rt.to_string() +
-               imm.to_string();
-    }
-};
+    int getOp(const std::string &op) {
+		if (RTypes.find(op) != RTypes.end()) {  //  prefer this method, since time complexity is logn and 
+			return 0;
+		}
+		if (ITypes.find(op) != ITypes.end()) {
+			return ITypes[op];
+		}
+		if (JTypes.find(op) != JTypes.end()) {
+			return JTypes[op];
+		}
+		return -1;
+	}
 
-/**
- * @brief
- * This class simulate the J-type instruction with 2 register identification
- * code.
- */
-class Jtype {
-  private:
-    bitset<6> opcode;   // operation code
-    bitset<26> target;  // unconditionally transfer number of the lower 26 bits
-                        // of the address
-  public:
-    /**
-     * @brief
-     * SetInfo receive the input instructions to each J-type instruction
-     * variable
-     * @param _opcode, recieve operation code
-     * @param _target, recieve unconditionally transfer numbfer of the lower 26
-     * bits of the address
-     * @return void
-     */
-    void SetInfo(int _opcode, int _target) {
-        opcode = bitset<6>(_opcode);
-        target = bitset<26>(_target);
-    }
-    /**
-     * @brief
-     * Use format() function to return the generated machine instruction in
-     * string.
-     * @return string
-     */
-    string format() {
-        return opcode.to_string() + target.to_string();
-    }
-};
+	int getFunc(const std::string &op) {
+	if (RTypes.find(op) != RTypes.end()) {
+			return RTypes[op];
+		}
+		return -1;
+	}
 
-/*
- * @brief
- * htoi: Converts a char of hexadecimal digits
- *       (containing the optional prefix) to its integer value
- * @param char* h: address of hex c-string ex) "0xf"
- * @return integer ex) 15
- */
-int htoi(char* h) {
-    string h_str = (string)h;
+	int getR(std::string &name) {
+		name = name.substr(0, 3);
+		if (Regs.find(name) == Regs.end()) {
+            cout << "Unknown register " << name << std::endl;
+			exit(1);
+		}
+		return Regs[name];
+	}
 
-    stringstream ss;
-    ss << hex << h;
-
-    int n;
-    ss >> n;
-
-    return n;
+	short getImm(std::string &word, int addr) {
+		if (labels.find(word) == labels.end()) {
+			std::istringstream ss(word);
+			short val;
+			ss >> val;
+			return val;
+		}
+		int imm = (short) labels[word];
+		imm = imm - (addr + 1);
+		return imm;
+	}
 }
 
-/* @brief
- * interpret_instruction: extract_instruction
- * @param char* line: is an preprocessed assembly line
- * @return string  appropriate 32 bit formatted instruction
- */
-string interpret_instruction(char* line) {
-    int op;
+int main(int argc, char **argv) {
+	if (argc != 3) {
+		cout << "Usage: ./assembler <input file> <output file>" << std::endl;
+		return 1;
+	}
 
-    char* token = strtok(line, delim);
+	ifstream is(argv[1]);
+	if (!is) {
+		cout << "Can't open " << argv[1] << std::endl;
+		return 1;
+	}
 
-    op = opmap[(string)token];
+	ofstream os(argv[2]);
+	if (!os) {
+		cout << "Can't create " << argv[2] << std::endl;
+		return 1;
+	}
 
-    int data_address;
-    int rs, rt, rd, sft, fn;
-    int target, offset, imm;
+	assembler::init();
 
-    Rtype r;
-    Itype i, i1, i2;
-    Jtype j;
+	string line;
+	int addr = 0;
+	while (getline(is, line)) {
+		istringstream ss(line);
+		string word;
+		if (!(ss >> word)) {
+			continue;
+		}
+		if (word[0] == '#') {
+			continue;
+		}
+		if (word[word.length() - 1] == ':') {
+			// label
+			word[word.length() - 1] = '\0';
+			assembler::labels[word.c_str()] = addr;
+			if (!(ss >> word)) {
+				continue;
+			}
+			if (word[0] == '#') {
+				continue;
+			}
+		}
+		addr++;
+	}
 
-    // We will figure which type this operation is based on opname
+	is.close();
+	is.open(argv[1]);
+	addr = 0;
+	while (getline(is, line)) {
+		istringstream ss(line);
+		string word;
+		if (!(ss >> word)) {
+			continue;
+		}
+		if (word[0] == '#') {
+			continue;
+		}
+//		cout << line << endl;
+		if (word[word.length() - 1] == ':') {
+			// label
+			if (!(ss >> word)) {
+				continue;
+			}
+			if (word[0] == '#') {
+				continue;
+			}
+		}
 
-    switch (op) {
-        // la
-    case 99:
+		int op = assembler::getOp(word);
+		if (op == -1) {
+			cout << "unknown instruction " << word << std::endl;
+			return 1;
+		}
+		unsigned int inst = op << 26;
+		int rs = 0, rt = 0, rd = 0, shamt = 0;
 
-        token = strtok(NULL, delim);
-        rt = atoi(token);
+		if (op == 0) {
+			// R-Type
+			int func = assembler::getFunc(word);
+			inst |= func & 0x3f;
+			switch (func) {
+            case sll:  // logical shift left
+            case sra:  // arithmetic shift right
+            case srl:  // logical shift right
+				ss >> word;
+                rd = assembler::getR(word);
+				ss >> word;
+                rt = assembler::getR(word);
+				ss >> shamt;
 
-        token = strtok(NULL, delim);
-        data_address = a_map[(string)token];
+				break;
 
-        if (data_address > DATA_START) {
-            i1.SetInfo(0xf, 0, rt, 0x1000);
-            i2.SetInfo(0xd, rt, rt, (data_address & 0xffff));
+            case sllv:  // logical shift left
+            case srav:  // arithmetic shift right
+            case srlv:  // logical shift right
+				ss >> word;
+                rd = assembler::getR(word);
+				ss >> word;
+                rt = assembler::getR(word);
+				ss >> word;
+                rs = assembler::getR(word);
 
-            return (i1.format() + i2.format());
-        }
+				break;
 
-        else {
-            i1.SetInfo(0xf, 0, rt, 0x1000);
-            return i1.format();
-        }
+            case jalr:  // jump instruction jalr
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                rd = assembler::getR(word);
+				break;
 
-        // R type instructions
-    case 0:
-        fn = fnmap[token];
+            case jr:  // jump instruction jr
+				ss >> word;
+                rs = assembler::getR(word);
+				break;
 
-        token = strtok(NULL, delim);
-        rd = atoi(token);
+            case teq:  // exception instruction
+			case tne:
+			case tge:
+			case tgeu:
+			case tlt:
+			case tltu:
+            case div:  // signed division
+            case divu: // unsigned division
+            case mult: // multiply operation
+			case multu:
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                rt = assembler::getR(word);
+				break;
 
-        switch (fn) {
-            // sll
-        case 0:
-            token = strtok(NULL, delim);
-            rt = atoi(token);
+            case mfhi:  // assigns the value of the special register HI to register address rd
+            case mflo:  // assigns the value of the special register LO to register address rd
+				ss >> word;
+                rd = assembler::getR(word);
+				break;
 
-            token = strtok(NULL, delim);
-            sft = atoi(token);
+            case mthi:  // assigns the value of the register address rs to the special register HI
+            case mtlo:  // assigns the value of the register address rs to the special register LO
+				ss >> word;
+                rs = assembler::getR(word);
+				break;
 
-            r.SetInfo(op, 0, rt, rd, sft, 0);
-            break;
+            default:  // other Rtypes
+				ss >> word;
+                rd = assembler::getR(word);
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                rt = assembler::getR(word);
+				break;
 
-            // srl
-        case 2:
-            token = strtok(NULL, delim);
-            rt = atoi(token);
+			}
+			inst |= (rs & 0x1f) << 21;
+			inst |= (rt & 0x1f) << 16;
+			inst |= (rd & 0x1f) << 11;
+			inst |= (shamt & 0x1f) << 6;
+		} else if (op == J || op == jal) {
+			// J-Type
+			string target;
+			ss >> target;
+            if (assembler::labels.find(target) == assembler::labels.end()) {
+                cout << "Can't find lable " << target << std::endl;
+				return 1;
+			}
+            inst |= assembler::labels[target];
+		} else {
+			// I-Type
+			int imm = 0;
+			char temp;
+			switch (op) {
+            case 1:  // branch instruction
+			case bgtz:
+			case blez:
+                rt = assembler::rts[word];
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                imm = assembler::getImm(word, addr);
+				//imm = imm - (addr + 1);
+				break;
 
-            token = strtok(NULL, delim);
-            sft = atoi(token);
+			case beq:
+			case bne:
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                rt = assembler::getR(word);
+				ss >> word;
+                imm = assembler::getImm(word, addr);
+//				imm = imm - (addr + 1);
+				break;
 
-            r.SetInfo(op, 0, rt, rd, sft, 2);
-            break;
+            case lui:  // 16 bits immediate number is saved to the high 16 bits of the register address rt
 
-            // jr
-        case 8:
-            r.SetInfo(op, rd, 0, 0, 0, 8);
-            break;
+            case lb:  // byte loading instruction
+            case lbu: // unsigned byte load instruction
+            case lh:  // half-word load instruction
+            case lhu: // unsigned half-word load instruction
+            case lw:  // word loading instruction
+			case lwl:
+			case lwr:
+            case ll:  // load linked
+            case sb:  // byte storage instruction
+            case sh:  // half-word storage instruction
+            case sw:  // word storage instruction
+            case swl:
+			case swr:
+			case sc:
+				ss >> word;
+                rt = assembler::getR(word);
+				ss >> imm;
+				ss >> temp;
+				ss >> word;
+				if (ss) {
+					word = word.substr(0, word.length() - 1);
+                    rs = assembler::getR(word);
+				}
+				break;
 
-            // other R type instructions
-        default:
-            token = strtok(NULL, delim);
-            rs = atoi(token);
+            default: // other Itypes
+				ss >> word;
+                rt = assembler::getR(word);
+				ss >> word;
+                rs = assembler::getR(word);
+				ss >> word;
+                imm = assembler::getImm(word, addr);
+				break;
+			}
 
-            token = strtok(NULL, delim);
-            rt = atoi(token);
+			inst |= (rs & 0x1f) << 21;
+			inst |= (rt & 0x1f) << 16;
+			inst |= (imm & 0xffff);
+		}
+		string bits;
+		for (int i = 0; i < 32; i++) {
+			if (inst & 1) {
+				bits = '1' + bits;
+			} else {
+				bits = '0' + bits;
+			}
+			inst = inst >> 1;
+		}
 
-            r.SetInfo(op, rs, rt, rd, 0, fn);
-            break;
-        }
+        cout << bits << std::endl;
+        os << bits << std::endl;
+		addr++;
 
-        return r.format();
-
-        // J type instructions
-    case 2:
-    case 3:
-        token = strtok(NULL, delim);
-
-        // label
-        target = labelmap[(string)token];
-
-        j.SetInfo(op, target / 4);
-        return j.format();
-
-        // I type instructions
-    default:
-        switch (op) {
-            // beq, bne
-        case 4:
-        case 5:
-            token = strtok(NULL, delim);
-            rs = atoi(token);
-
-            token = strtok(NULL, delim);
-            rt = atoi(token);
-
-            token = strtok(NULL, delim);
-            target = labelmap[(string)token];
-
-            offset = (target - (pc + 4)) / 4;
-            i.SetInfo(op, rs, rt, offset);
-
-            break;
-
-            // lw, sw;
-        case 0x23:
-        case 0x2b:
-            token = strtok(NULL, delim);
-            rt = atoi(token);
-
-            token = strtok(NULL, " \t(");
-
-            offset = atoi(token);
-
-            token = strtok(NULL, "$) ");
-            rs = atoi(token);
-            i.SetInfo(op, rs, rt, offset);
-
-            break;
-
-            // lui
-        case 0xf:
-            token = strtok(NULL, delim);
-            rt = atoi(token);
-
-            token = strtok(NULL, delim);
-            if (strstr(token, "0x")) {
-                imm = htoi(token);
-            }
-
-            else {
-                imm = atoi(token);
-            }
-            i.SetInfo(op, 0, rt, imm);
-            break;
-
-            // other I type instructions
-        default:
-            token = strtok(NULL, delim);
-            rt = atoi(token);
-
-            token = strtok(NULL, delim);
-            rs = atoi(token);
-
-            token = strtok(NULL, delim);
-            if (strstr(token, "0x")) {
-                imm = htoi(token);
-            }
-
-            else {
-                imm = atoi(token);
-            }
-            i.SetInfo(op, rs, rt, imm);
-
-            break;
-        }
-
-        return i.format();
-    }
+	}
+	return 0;
 }
